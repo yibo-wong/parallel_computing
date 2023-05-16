@@ -1,0 +1,11 @@
+# rows of the given matrix
+nrows: 3
+# cols of the given matrix
+ncols: 3
+# data type of the given matrix
+type: double
+# element value
+value:
+0.0, 0.0, 1.0
+0.0, 0.0, 1.0
+1.0, 1.0, 1.0

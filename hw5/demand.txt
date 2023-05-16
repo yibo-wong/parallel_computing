@@ -1,0 +1,7 @@
+calculation RSMdiago
+result_print 1
+timer_print 1
+matrix_type file
+matrix_1 ./diago/case_3/mat_1.txt
+matrix_2 ./matmul/case_3/mat_2.txt
+
