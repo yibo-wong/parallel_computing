@@ -16,8 +16,6 @@
 using namespace std;
 
 int main() {
-  omp_set_num_threads(2);
-
   timer::tick("read", "file");
 
   ifstream file;
@@ -26,6 +24,7 @@ int main() {
   Input_points *input_p = new Input_points;
   Input_f *input_f = new Input_f;
 
+  cout << "reading INPUT file..." << endl;
   file.open("./input/INPUT_test.txt");
   input_d->read_in(file);
   file.close();
@@ -36,15 +35,21 @@ int main() {
   string p_path = input_d->points_path;
   string f_path = input_d->distribution_path;
 
+  cout << "reading V file..." << endl;
   file.open(v_path);
   input_v->read_in(file);
   file.close();
+  int nx = input_v->nx;
+  int ny = input_v->ny;
+  int nz = input_v->nz;
 
+  cout << "reading POINTS file..." << endl;
   file.open(p_path);
   input_p->read_in(file);
   file.close();
   int point_num = input_p->num;
 
+  cout << "reading DISTRIBUTION file..." << endl;
   file.open(f_path);
   input_f->read_in(file);
   file.close();
@@ -53,6 +58,7 @@ int main() {
   double cutoff = input_f->cutoff;
 
   /////// using preprocess to optimize ///////
+  cout << "PREPROCESSING..." << endl;
   timer::tick("pre-", "process");
   int x_pre = 30;
   int y_pre = 30;
@@ -65,6 +71,8 @@ int main() {
   ////////////////////////////////////////////
 
   timer::tick("calc", "calc");
+
+  cout << "start calculation..." << endl;
 
   Spline spline(input_f->mesh, input_f->cutoff, input_f->f);
 
@@ -83,7 +91,7 @@ int main() {
   for (int i = 0; i < x_pre; i++) {
     for (int j = 0; j < y_pre; j++) {
       for (int k = 0; k < z_pre; k++) {
-        long long info = prep.value(i, j, k);
+        long long int info = prep.value(i, j, k);
 
         int x_start = (i * big_dx) / dx;
         int x_end = i + 1 == x_pre ? ((i + 1) * big_dx) / dx + 1
@@ -113,6 +121,18 @@ int main() {
                   double x = dx * m_x;
                   double y = dy * m_y;
                   double z = dz * m_z;
+
+                  int num_on_edge = int(m_x == 0 || m_x == nx - 1) +
+                                    int(m_y == 0 || m_y == ny - 1) +
+                                    int(m_z == 0 || m_z == nz - 1);
+
+                  double coe = 1.0; // coefficient of integral.
+                  if (num_on_edge == 1)
+                    coe = 0.5;
+                  else if (num_on_edge == 2)
+                    coe = 0.25;
+                  else if (num_on_edge == 3)
+                    coe = 0.125;
 
                   double point_x_1 = input_p->px[p_i];
                   double point_y_1 = input_p->py[p_i];
@@ -147,7 +167,7 @@ int main() {
                       result = spl * spl * input_v->value(m_x, m_y, m_z);
                     }
                   }
-                  result *= dx * dy * dz;
+                  result *= dx * dy * dz * coe;
                   sum += result;
                 }
               }
@@ -168,6 +188,7 @@ int main() {
   }
   timer::tick("calc", "calc");
   timer::tick("write", "file");
+  cout << "writing file..." << endl;
 
   ofstream out;
   out.open("./result/hamilton_omp_v0.txt");

@@ -22,6 +22,7 @@ int main() {
   Input_points *input_p = new Input_points;
   Input_f *input_f = new Input_f;
 
+  cout << "reading INPUT file..." << endl;
   file.open("./input/INPUT_test.txt");
   input_d->read_in(file);
   file.close();
@@ -32,15 +33,21 @@ int main() {
   string p_path = input_d->points_path;
   string f_path = input_d->distribution_path;
 
+  cout << "reading V file..." << endl;
   file.open(v_path);
   input_v->read_in(file);
   file.close();
+  int nx = input_v->nx;
+  int ny = input_v->ny;
+  int nz = input_v->nz;
 
+  cout << "reading POINTS file..." << endl;
   file.open(p_path);
   input_p->read_in(file);
   file.close();
   int point_num = input_p->num;
 
+  cout << "reading DISTRIBUTION file..." << endl;
   file.open(f_path);
   input_f->read_in(file);
   file.close();
@@ -48,6 +55,7 @@ int main() {
   double cutoff = input_f->cutoff;
 
   /////// using preprocess to optimize ///////
+  cout << "preprocessing..." << endl;
   timer::tick("pre-", "process");
   int preprocess_mesh = 30;
   int x_pre = preprocess_mesh;
@@ -61,7 +69,7 @@ int main() {
   ////////////////////////////////////////////
 
   timer::tick("calc", "calc");
-
+  cout << "start calculation..." << endl;
   // ofstream log;
   // log.open("./result/v1.log");
 
@@ -69,9 +77,9 @@ int main() {
 
   double hamilton[52][52];
   memset(hamilton, 0, sizeof(hamilton));
-  double dx = (input_d->lx) / (input_v->nx - 1);
-  double dy = (input_d->ly) / (input_v->ny - 1);
-  double dz = (input_d->lz) / (input_v->nz - 1);
+  double dx = (input_d->lx) / (nx - 1);
+  double dy = (input_d->ly) / (ny - 1);
+  double dz = (input_d->lz) / (nz - 1);
 
   long long int info;
   double big_dx = prep.lx / prep.nx;
@@ -82,6 +90,7 @@ int main() {
   int z_start = 0;
 
   for (int i = 0; i < x_pre; i++) {
+    cout << int(100 * double(i) / x_pre) << " % finished" << endl;
     for (int j = 0; j < y_pre; j++) {
       for (int k = 0; k < z_pre; k++) {
         // cout << i << " " << j << " " << k << endl;
@@ -96,9 +105,6 @@ int main() {
         int z_start = (k * big_dz) / dz;
         int z_end = k + 1 == z_pre ? ((k + 1) * big_dz) / dz + 1
                                    : ((k + 1) * big_dz) / dz;
-
-        // cout << i << "  " << j << "  " << k << endl;
-        // cout << x_start << "  " << y_start << "  " << z_start << endl;
 
         for (int p_i = 0; p_i < input_p->num; p_i++) {
           // some prune
@@ -118,6 +124,18 @@ int main() {
                   double x = dx * m_x;
                   double y = dy * m_y;
                   double z = dz * m_z;
+
+                  int num_on_edge = int(m_x == 0 || m_x == nx - 1) +
+                                    int(m_y == 0 || m_y == ny - 1) +
+                                    int(m_z == 0 || m_z == nz - 1);
+
+                  double coe = 1.0; // coefficient of integral.
+                  if (num_on_edge == 1)
+                    coe = 0.5;
+                  else if (num_on_edge == 2)
+                    coe = 0.25;
+                  else if (num_on_edge == 3)
+                    coe = 0.125;
 
                   double point_x_1 = input_p->px[p_i];
                   double point_y_1 = input_p->py[p_i];
@@ -152,7 +170,7 @@ int main() {
                       result = spl * spl * input_v->value(m_x, m_y, m_z);
                     }
                   }
-                  result *= dx * dy * dz;
+                  result *= dx * dy * dz * coe;
                   sum += result;
                 }
               }
@@ -171,6 +189,7 @@ int main() {
   // log.close();
   timer::tick("calc", "calc");
   timer::tick("write", "file");
+  cout << "writing file..." << endl;
   ofstream out;
   out.open("./result/hamilton_v1.txt");
   for (int i = 0; i < input_p->num; i++) {

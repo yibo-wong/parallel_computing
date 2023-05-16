@@ -13,7 +13,7 @@ using namespace std;
 int main() {
   ofstream out;
   int N = 300;
-  out.open("V_test_big.txt");
+  out.open("../input/V_test_big.txt");
   out << "nx " << N << endl;
   out << "ny " << N << endl;
   out << "nz " << N << endl;

@@ -87,6 +87,18 @@ int main() {
             double y = dy * m_y;
             double z = dz * m_z;
 
+            int num_on_edge = int(m_x == 0 || m_x == input_v->nx - 1) +
+                              int(m_y == 0 || m_y == input_v->ny - 1) +
+                              int(m_z == 0 || m_z == input_v->nz - 1);
+
+            double coe = 1.0; // coefficient of integral.
+            if (num_on_edge == 1)
+              coe = 0.5;
+            else if (num_on_edge == 2)
+              coe = 0.25;
+            else if (num_on_edge == 3)
+              coe = 0.125;
+
             double point_x_1 = input_p->px[p_i];
             double point_y_1 = input_p->py[p_i];
             double point_z_1 = input_p->pz[p_i];
@@ -118,7 +130,7 @@ int main() {
               }
 
               // result *= dx * dy * dz * simp;
-              result *= dx * dy * dz;
+              result *= dx * dy * dz * coe;
               if (p_i == p_j)
                 hamilton[p_i][p_j] += result;
               else {
