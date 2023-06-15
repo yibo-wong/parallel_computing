@@ -46,11 +46,11 @@ public:
   }
   double a[1000], b[1000], c[1000], y[1000];
   void triLU() {
-    y[0] = -2;
-    y[n] = -2 * exp(-12);
+    y[0] = (value[1] - value[0]) / (len / n);
+    y[n] = 0;
 
     for (int i = 1; i < n; i++) {
-      y[i] = n * (value[i + 1] - value[i - 1]) / 4.0;
+      y[i] = 1.5 * n * (value[i + 1] - value[i - 1]) / len;
     }
 
     a[0] = 1;
@@ -74,18 +74,19 @@ public:
   }
   double spline(double x) {
     int p;
-    for (int i = 0; i <= n; i++) {
-      if (len * i / n > x) {
-        p = i;
-        break;
-      }
-    }
+    p = int(x * n / len) + 1;
     double ans = 0;
     double h = len / n;
-    double dx_1 = x - len * (p - 1) / n;
-    double dx_2 = x - len * p / n;
+    double dx_1 = x - (len * (p - 1)) / n;
+    double dx_2 = x - (len * p) / n;
+    // cout << "dx2 " << dx_2 << endl;
     double frac_1 = dx_1 / h;
     double frac_2 = dx_2 / h;
+    // cout << frac_1 << "#" << frac_2 << endl;
+    // cout << endl
+    //      << value[p - 1] << "  " << value[p] << "  " << y[p - 1] << "  " <<
+    //      y[p]
+    //      << endl;
     ans =
         ((1 + 2 * frac_1) * value[p - 1] + dx_1 * y[p - 1]) * frac_2 * frac_2 +
         ((1 - 2 * frac_2) * value[p] + dx_2 * y[p]) * frac_1 * frac_1;

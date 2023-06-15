@@ -166,6 +166,7 @@ public:
       char useless;
       line_is >> useless >> px[num] >> useless >> py[num] >> useless >>
           pz[num] >> useless;
+      // line_is >> px[num] >> py[num] >> pz[num];
       num += 1;
     }
     return 0;

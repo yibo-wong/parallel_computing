@@ -125,18 +125,6 @@ int main() {
                   double y = dy * m_y;
                   double z = dz * m_z;
 
-                  int num_on_edge = int(m_x == 0 || m_x == nx - 1) +
-                                    int(m_y == 0 || m_y == ny - 1) +
-                                    int(m_z == 0 || m_z == nz - 1);
-
-                  double coe = 1.0; // coefficient of integral.
-                  if (num_on_edge == 1)
-                    coe = 0.5;
-                  else if (num_on_edge == 2)
-                    coe = 0.25;
-                  else if (num_on_edge == 3)
-                    coe = 0.125;
-
                   double point_x_1 = input_p->px[p_i];
                   double point_y_1 = input_p->py[p_i];
                   double point_z_1 = input_p->pz[p_i];
@@ -170,7 +158,7 @@ int main() {
                       result = spl * spl * input_v->value(m_x, m_y, m_z);
                     }
                   }
-                  result *= dx * dy * dz * coe;
+                  result *= dx * dy * dz;
                   sum += result;
                 }
               }
@@ -191,7 +179,8 @@ int main() {
   timer::tick("write", "file");
   cout << "writing file..." << endl;
   ofstream out;
-  out.open("./result/hamilton_v1.txt");
+  out.open("./result/hamilton.txt");
+  out << input_p->num << endl;
   for (int i = 0; i < input_p->num; i++) {
     for (int j = 0; j < input_p->num; j++) {
       out << setw(15) << hamilton[i][j];

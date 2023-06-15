@@ -78,30 +78,28 @@ int main() {
 
   double hamilton[52][52];
   memset(hamilton, 0, sizeof(hamilton));
-  double dx = (lx) / (input_v->nx - 1);
-  double dy = (ly) / (input_v->ny - 1);
-  double dz = (lz) / (input_v->nz - 1);
+  double dx = (lx) / (input_v->nx);
+  double dy = (ly) / (input_v->ny);
+  double dz = (lz) / (input_v->nz);
 
   double big_dx = lx / x_pre;
   double big_dy = ly / y_pre;
   double big_dz = lz / z_pre;
 
 #pragma omp parallel for collapse(3)
-  // #pragma omp parallel for schedule(dynamic)
   for (int i = 0; i < x_pre; i++) {
     for (int j = 0; j < y_pre; j++) {
       for (int k = 0; k < z_pre; k++) {
+        if (i == 0 && j == 0 && k == 0)
+          cout << "total threads: " << omp_get_num_threads() << endl;
         long long int info = prep.value(i, j, k);
 
         int x_start = (i * big_dx) / dx;
-        int x_end = i + 1 == x_pre ? ((i + 1) * big_dx) / dx + 1
-                                   : ((i + 1) * big_dx) / dx;
+        int x_end = i + 1 == x_pre ? nx : ((i + 1) * big_dx) / dx;
         int y_start = (j * big_dy) / dy;
-        int y_end = j + 1 == y_pre ? ((j + 1) * big_dy) / dy + 1
-                                   : ((j + 1) * big_dy) / dy;
+        int y_end = j + 1 == y_pre ? ny : ((j + 1) * big_dy) / dy;
         int z_start = (k * big_dz) / dz;
-        int z_end = k + 1 == z_pre ? ((k + 1) * big_dz) / dz + 1
-                                   : ((k + 1) * big_dz) / dz;
+        int z_end = k + 1 == z_pre ? nz : ((k + 1) * big_dz) / dz;
 
         for (int p_i = 0; p_i < point_num; p_i++) {
           // some prune
@@ -126,13 +124,13 @@ int main() {
                                     int(m_y == 0 || m_y == ny - 1) +
                                     int(m_z == 0 || m_z == nz - 1);
 
-                  double coe = 1.0; // coefficient of integral.
-                  if (num_on_edge == 1)
-                    coe = 0.5;
-                  else if (num_on_edge == 2)
-                    coe = 0.25;
-                  else if (num_on_edge == 3)
-                    coe = 0.125;
+                  // double coe = 1.0; // coefficient of integral.
+                  // if (num_on_edge == 1)
+                  //   coe = 0.5;
+                  // else if (num_on_edge == 2)
+                  //   coe = 0.25;
+                  // else if (num_on_edge == 3)
+                  //   coe = 0.125;
 
                   double point_x_1 = input_p->px[p_i];
                   double point_y_1 = input_p->py[p_i];
@@ -167,7 +165,7 @@ int main() {
                       result = spl * spl * input_v->value(m_x, m_y, m_z);
                     }
                   }
-                  result *= dx * dy * dz * coe;
+                  result *= dx * dy * dz;
                   sum += result;
                 }
               }
@@ -191,7 +189,8 @@ int main() {
   cout << "writing file..." << endl;
 
   ofstream out;
-  out.open("./result/hamilton_omp_v0.txt");
+  out.open("./result/hamilton.txt");
+  out << point_num << endl;
   for (int i = 0; i < point_num; i++) {
     for (int j = 0; j < point_num; j++) {
       out << setw(15) << hamilton[i][j];

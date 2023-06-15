@@ -22,7 +22,7 @@ int main() {
   Input_points *input_p = new Input_points;
   Input_f *input_f = new Input_f;
 
-  file.open("./input/INPUT.txt");
+  file.open("./input/INPUT_test.txt");
   input_d->read_in(file);
   file.close();
   double lx = input_d->lx;
@@ -63,41 +63,10 @@ int main() {
         for (int p_i = 0; p_i < input_p->num; p_i++) {
           for (int p_j = p_i; p_j < input_p->num; p_j++) {
             double result = 0;
-            /////// Simpson Algorithm or not??? ///////
-            // int s_x = 0, s_y = 0, s_z = 0;
-            // double simp = 0;
-            // if (m_x == 0 || m_x == input_v->nx - 1)
-            //   s_x = 1;
-            // else
-            //   s_x = m_x % 2 == 0 ? 2 : 4;
-
-            // if (m_y == 0 || m_y == input_v->ny - 1)
-            //   s_y = 1;
-            // else
-            //   s_y = m_y % 2 == 0 ? 2 : 4;
-
-            // if (m_z == 0 || m_z == input_v->nz - 1)
-            //   s_z = 1;
-            // else
-            //   s_z = m_z % 2 == 0 ? 2 : 4;
-
-            // simp = double(s_x * s_y * s_z) / 27.0;
 
             double x = dx * m_x;
             double y = dy * m_y;
             double z = dz * m_z;
-
-            int num_on_edge = int(m_x == 0 || m_x == input_v->nx - 1) +
-                              int(m_y == 0 || m_y == input_v->ny - 1) +
-                              int(m_z == 0 || m_z == input_v->nz - 1);
-
-            double coe = 1.0; // coefficient of integral.
-            if (num_on_edge == 1)
-              coe = 0.5;
-            else if (num_on_edge == 2)
-              coe = 0.25;
-            else if (num_on_edge == 3)
-              coe = 0.125;
 
             double point_x_1 = input_p->px[p_i];
             double point_y_1 = input_p->py[p_i];
@@ -130,7 +99,7 @@ int main() {
               }
 
               // result *= dx * dy * dz * simp;
-              result *= dx * dy * dz * coe;
+              result *= dx * dy * dz;
               if (p_i == p_j)
                 hamilton[p_i][p_j] += result;
               else {
@@ -147,7 +116,8 @@ int main() {
 
   timer::tick("write", "file");
   ofstream out;
-  out.open("./result/hamilton_v0.txt");
+  out.open("./result/hamilton.txt");
+  out << input_p->num << endl;
   for (int i = 0; i < input_p->num; i++) {
     for (int j = 0; j < input_p->num; j++) {
       out << setw(15) << hamilton[i][j];
