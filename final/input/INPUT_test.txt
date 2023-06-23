@@ -9,9 +9,9 @@ support_SH 0
 diago_lib lapack
 support_Periodic_Boundary 0
 multi_parallel_strategies 0
-# points_path ./input/efficiency/Point/point50.txt
-# venergy_path ./input/efficiency/V/V256.txt
-# distribution_path ./input/efficiency/Distribution/distribution80.txt 
-points_path ./input/correctness/case1/point2.txt
-venergy_path ./input/correctness/case1/V-1.txt
-distribution_path ./input/correctness/case1/distribution80.txt
+points_path ./input/efficiency/Point/point50.txt
+venergy_path ./input/efficiency/V/V128.txt
+distribution_path ./input/efficiency/Distribution/distribution80.txt 
+# points_path ./input/correctness/case1/point2.txt
+# venergy_path ./input/correctness/case1/V-1.txt
+# distribution_path ./input/correctness/case1/distribution80.txt

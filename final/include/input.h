@@ -164,9 +164,9 @@ public:
       }
       istringstream line_is(line);
       char useless;
-      line_is >> useless >> px[num] >> useless >> py[num] >> useless >>
-          pz[num] >> useless;
-      // line_is >> px[num] >> py[num] >> pz[num];
+      // line_is >> useless >> px[num] >> useless >> py[num] >> useless >>
+      //     pz[num] >> useless;
+      line_is >> px[num] >> py[num] >> pz[num];
       num += 1;
     }
     return 0;

@@ -10,207 +10,48 @@
 
 #include "./include/input.h"
 #include "./include/itpln.h"
-#include "./include/preprocess.h"
-#include "./include/timer.h"
 
 using namespace std;
 
-__global__ void calculation(double *cuda_v, double *cuda_f, double *cuda_y,
-                            double cutoff, int mesh, double *cuda_ham,
-                            double *cuda_px, double *cuda_py, double *cuda_pz,
-                            long long int *cuda_info, double lx, double ly,
-                            double lz, int nx, int ny, int nz, int x_pre,
-                            int y_pre, int z_pre, int point_num) {
-  bool not_calc = false;
-  double result = 0;
-  int i = blockIdx.x;
-  int j = blockIdx.y;
-  int k = blockIdx.z;
-  int t_i = threadIdx.x;
-  int t_j = threadIdx.y;
-  if (t_j < t_i) not_calc = true;
-  int p_i = 0;
-  int p_j = 0;
-  double dx = lx / (nx - 1);
-  double dy = ly / (ny - 1);
-  double dz = lz / (nz - 1);
-  double big_dx = dx / x_pre;
-  double big_dy = dy / y_pre;
-  double big_dz = dz / z_pre;
-  int big_x = i == nx ? x_pre : int(i * dx / big_dx);
-  int big_y = j == ny ? y_pre : int(j * dy / big_dy);
-  int big_z = k == nz ? z_pre : int(k * dz / big_dz);
-  long long int point_info =
-      cuda_info[big_x * y_pre * z_pre + big_y * z_pre + big_z];
-
-  int sum_temp = 0;
-  bool flag = 0;
-  for (int i = 0; i < point_num; i++) {
-    if ((point_info >> i) & 1) {
-      if (sum_temp == p_i) {
-        flag = 1;
-        p_i = i;
-        break;
-      }
-      sum_temp++;
-    }
-  }
-  if (!flag) not_calc = true;
-
-  sum_temp = 0;
-  flag = 0;
-  for (int i = 0; i < point_num; i++) {
-    if ((point_info >> i) & 1) {
-      if (sum_temp == p_j) {
-        flag = 1;
-        p_j = i;
-        break;
-      }
-      sum_temp++;
-    }
-  }
-  if (!flag) not_calc = true;
-
-  double result = 0;
-
-  double x = dx * i;
-  double y = dy * j;
-  double z = dz * k;
-
-  int num_on_edge = int(i == 0 || i == nx - 1) + int(j == 0 || j == ny - 1) +
-                    int(k == 0 || k == nz - 1);
-
-  double coe = 1.0;  // coefficient of integral.
-  if (num_on_edge == 1)
-    coe = 0.5;
-  else if (num_on_edge == 2)
-    coe = 0.25;
-  else if (num_on_edge == 3)
-    coe = 0.125;
-
-  double point_x_1 = cuda_px[p_i];
-  double point_y_1 = cuda_py[p_i];
-  double point_z_1 = cuda_pz[p_i];
-  double point_x_2 = 0;
-  double point_y_2 = 0;
-  double point_z_2 = 0;
-  double r1 = sqrt((x - point_x_1) * (x - point_x_1) +
-                   (y - point_y_1) * (y - point_y_1) +
-                   (z - point_z_1) * (z - point_z_1));
-  double r2 = 0;
-  if (p_i != p_j) {
-    point_x_2 = cuda_px[p_j];
-    point_y_2 = cuda_py[p_j];
-    point_z_2 = cuda_pz[p_j];
-    r2 = sqrt((x - point_x_2) * (x - point_x_2) +
-              (y - point_y_2) * (y - point_y_2) +
-              (z - point_z_2) * (z - point_z_2));
-  }
-  double f1 = 0;
-  double f2 = 0;
-  double v = cuda_v[i * ny * nz + j * nz + k];
-  if (p_i != p_j) {
-    if (r1 >= cutoff || r2 >= cutoff) not_calc = true;
-  } else {
-    if (r1 >= cutoff) not_calc = true;
-  }
-  ////////calc spline(r1)/////////
-  if (!not_calc) {
-    int p = int(r1 * mesh / cutoff) + 1;
-    double ans = 0;
-    double h = cutoff / mesh;
-    double dx_1 = r1 - cutoff * (p - 1) / mesh;
-    double dx_2 = r1 - cutoff * p / mesh;
-    double frac_1 = dx_1 / h;
-    double frac_2 = dx_2 / h;
-    f1 = ((1 + 2 * frac_1) * cuda_f[p - 1] + dx_1 * cuda_f[p - 1]) * frac_2 *
-             frac_2 +
-         ((1 - 2 * frac_2) * cuda_f[p] + dx_2 * cuda_y[p]) * frac_1 * frac_1;
-  }
-  ////////////////////////////////
-
-  ////////calc spline(r2)/////////
-  if (p_i != p_j && (!not_calc)) {
-    int p = int(r2 * mesh / cutoff) + 1;
-    double ans = 0;
-    double h = cutoff / mesh;
-    double dx_1 = r2 - cutoff * (p - 1) / mesh;
-    double dx_2 = r2 - cutoff * p / mesh;
-    double frac_1 = dx_1 / h;
-    double frac_2 = dx_2 / h;
-    f1 = ((1 + 2 * frac_1) * cuda_f[p - 1] + dx_1 * cuda_f[p - 1]) * frac_2 *
-             frac_2 +
-         ((1 - 2 * frac_2) * cuda_f[p] + dx_2 * cuda_y[p]) * frac_1 * frac_1;
-  }
-  ////////////////////////////////
-
-  if (!not_calc) {
-    if (p_i == p_j) {
-      result = dx * dy * dz * f1 * f1 * coe * v;
-    } else {
-      result = dx * dy * dz * f1 * f2 * coe * v;
-    }
-  }
-  cuda_ham[(p_i * point_num + p_j) * (nx * ny * nz) + i * ny * nz + j * nz +
-           k] = result;
-  __syncthreads();
-
-  ////////reduction////////
-
-  return;
+__device__ double calc_spline(double y[], double value[], double &len, int &n,
+                              double &x) {
+  int p;
+  p = int(x * n / len) + 1;
+  double ans = 0;
+  double h = len / n;
+  double dx_1 = x - (len * (p - 1)) / n;
+  double dx_2 = x - (len * p) / n;
+  double frac_1 = dx_1 / h;
+  double frac_2 = dx_2 / h;
+  ans = ((1 + 2 * frac_1) * value[p - 1] + dx_1 * y[p - 1]) * frac_2 * frac_2 +
+        ((1 - 2 * frac_2) * value[p] + dx_2 * y[p]) * frac_1 * frac_1;
+  return ans;
 }
 
-void cuda_solve(double *v, double *f, double *y, double cutoff, int mesh,
-                double *px, double *py, double *pz, long long int *info,
-                double lx, double ly, double lz, int nx, int ny, int nz,
-                int x_pre, int y_pre, int z_pre, int point_num) {
-  // calculation(double *cuda_v, double *cuda_f, double *cuda_y,
-  //                             double cutoff, int mesh, double ***cuda_ham,
-  //                             double *cuda_px, double *cuda_py, double
-  //                             *cuda_pz, long long int *cuda_info, double lx,
-  //                             double ly, double lz, int nx, int ny, int nz,
-  //                             int x_pre, int y_pre, int z_pre)
-
-  int size_v = (nx * ny * nz + 2) * sizeof(double);
-  double *cuda_v;
-  cudaMalloc((void **)&cuda_v, size_v);
-  cudaMemcpy(cuda_v, v, size_v, cudaMemcpyHostToDevice);
-
-  int size_f = (mesh + 10) * sizeof(double);
-  double *cuda_f;
-  cudaMalloc((void **)&cuda_f, size_f);
-  cudaMemcpy(cuda_f, f, size_f, cudaMemcpyHostToDevice);
-
-  int size_y = (mesh + 10) * sizeof(double);
-  double *cuda_y;
-  cudaMalloc((void **)&cuda_y, size_y);
-  cudaMemcpy(cuda_y, y, size_y, cudaMemcpyHostToDevice);
-
-  int size_p = (point_num + 5) * sizeof(double);
-  double *cuda_px;
-  cudaMalloc((void **)&cuda_px, size_p);
-  cudaMemcpy(cuda_px, px, size_p, cudaMemcpyHostToDevice);
-  double *cuda_py;
-  cudaMalloc((void **)&cuda_py, size_p);
-  cudaMemcpy(cuda_py, py, size_p, cudaMemcpyHostToDevice);
-  double *cuda_pz;
-  cudaMalloc((void **)&cuda_pz, size_p);
-  cudaMemcpy(cuda_pz, pz, size_p, cudaMemcpyHostToDevice);
-
-  int size_info = (point_num + 5) * sizeof(long long int);
-  long long int *cuda_info;
-  cudaMalloc((void **)&cuda_info, size_info);
-  cudaMemcpy(cuda_info, info, size_info, cudaMemcpyHostToDevice);
-
-  double *cuda_ham;
-  int size_ham = point_num * point_num * nx * ny * nz + 10;
-
-  dim3 grid_size(nx + 5, ny + 5, nz + 5);
-  dim3 block_size(32, 32);
+__global__ void calc(double lx, double ly, double lz, int nx, int ny, int nz,
+                     double *V, double *px, double *py, double *pz,
+                     double *spline_value, double *spline_y, double cutoff,
+                     int n_mesh, int *calc_point_1, int *calc_point_2,
+                     int cube_r) {
+  if (threadIdx.x % 500 == 0) {
+    double dx = lx / nx;
+    int x = blockIdx.x;
+    int p1 = calc_point_1[x];
+    int p2 = calc_point_2[x];
+    int cx = int(px[p1] / dx);
+    int cy = int(py[p1] / dx);
+    int cz = int(pz[p1] / dx);
+    double v_t = V[cx * ny * nz + cy * nz + cz];
+    printf(
+        "I'm gpu %d - %d . At least it works.\n  My point 1 is: %d : "
+        "(%f,%f,%f). My point 2 is: %d : (%f,%f,%f).\n  My central point "
+        "is:(%d,%d,%d), cube radius = %d, V at center = %f \n",
+        blockIdx.x, threadIdx.x, calc_point_1[x], px[p1], py[p1], pz[p1],
+        calc_point_2[x], px[p2], py[p2], pz[p2], cx, cy, cz, cube_r, v_t);
+  }
 }
 
 int main() {
-  // timer::tick("read", "file");
   ifstream file;
   Input_V *input_v = new Input_V;
   Input_demand *input_d = new Input_demand;
@@ -229,7 +70,7 @@ int main() {
   string f_path = input_d->distribution_path;
 
   cout << "reading V file..." << endl;
-  file.open(v_path);
+  file.open(v_path.c_str());
   input_v->read_in(file);
   file.close();
   int nx = input_v->nx;
@@ -237,54 +78,113 @@ int main() {
   int nz = input_v->nz;
 
   cout << "reading POINTS file..." << endl;
-  file.open(p_path);
+  file.open(p_path.c_str());
   input_p->read_in(file);
   file.close();
   int point_num = input_p->num;
 
   cout << "reading DISTRIBUTION file..." << endl;
-  file.open(f_path);
+  file.open(f_path.c_str());
   input_f->read_in(file);
   file.close();
-  // timer::tick("read", "file");
+
   double cutoff = input_f->cutoff;
+  int mesh = input_f->mesh;
 
-  /////// using preprocess to optimize ///////
-  cout << "preprocessing..." << endl;
-  // timer::tick("pre-", "process");
-  int preprocess_mesh = 30;
-  int x_pre = preprocess_mesh;
-  int y_pre = preprocess_mesh;
-  int z_pre = preprocess_mesh;
-  Prep prep = Prep(x_pre, y_pre, z_pre, lx, ly, lz, cutoff);
+  bool cross[50][50];
   for (int i = 0; i < point_num; i++) {
-    prep.update(input_p->px[i], input_p->py[i], input_p->pz[i], i);
+    cross[i][i] = 1;
+    for (int j = i + 1; j < 50; j++) {
+      double x1 = input_p->px[i];
+      double y1 = input_p->py[i];
+      double z1 = input_p->pz[i];
+      double x2 = input_p->px[j];
+      double y2 = input_p->py[j];
+      double z2 = input_p->pz[j];
+      double dist2 =
+          (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2) + (z1 - z2) * (z1 - z2);
+      if (dist2 < 4 * cutoff * cutoff) {
+        cross[i][j] = cross[j][i] = 1;
+      } else
+        cross[i][j] = cross[j][i] = 0;
+    }
   }
-  long long int *info;
-  info = new long long int[x_pre * y_pre * z_pre + 8];
-  memcpy(info, prep.info,
-         int(sizeof(long long int)) * (x_pre * y_pre * z_pre + 5));
-  // timer::tick("pre-", "process");
-  ////////////////////////////////////////////
 
-  // timer::tick("calc", "calc");
-  cout << "start calculation..." << endl;
+  int grid_size = 0;
+  // these variables go into GPU.
+  int calc_point_1[200];
+  int calc_point_2[200];
+  for (int i = 0; i < 50; i++) {
+    for (int j = i; j < 50; j++) {
+      if (cross[i][j]) {
+        calc_point_1[grid_size] = i;
+        calc_point_2[grid_size] = j;
+        grid_size++;
+      }
+    }
+  }
 
+  // these go into GPU.
   Spline spline(input_f->mesh, input_f->cutoff, input_f->f);
 
-  // timer::tick("calc", "calc");
-  // // timer::tick("write", "file");
-  // cout << "writing file..." << endl;
-  // ofstream out;
-  // out.open("./result/hamilton_cuda_v0.txt");
-  // for (int i = 0; i < input_p->num; i++) {
-  //   for (int j = 0; j < input_p->num; j++) {
-  //     out << setw(15) << hamilton[i][j];
-  //   }
-  //   out << endl;
-  // }
-  // out.close();
-  // // timer::tick("write", "file");
-  // // timer::print();
+  int spline_n = spline.n;
+  double spline_len = spline.len;
+
+  int block_size = 1024;
+
+  // replicate these variables
+
+  double *dev_v;
+  cudaMalloc((double **)&dev_v, (nx * ny * nz + 2) * (sizeof(double)));
+  cudaMemcpy(dev_v, input_v->V, (nx * ny * nz + 2) * (sizeof(double)),
+             cudaMemcpyHostToDevice);
+
+  double *dev_px;
+  cudaMalloc((double **)&dev_px, point_num * sizeof(double));
+  cudaMemcpy(dev_px, input_p->px, point_num * sizeof(double),
+             cudaMemcpyHostToDevice);
+
+  double *dev_py;
+  cudaMalloc((double **)&dev_py, point_num * sizeof(double));
+  cudaMemcpy(dev_py, input_p->py, point_num * sizeof(double),
+             cudaMemcpyHostToDevice);
+
+  double *dev_pz;
+  cudaMalloc((double **)&dev_pz, point_num * sizeof(double));
+  cudaMemcpy(dev_pz, input_p->pz, point_num * sizeof(double),
+             cudaMemcpyHostToDevice);
+
+  double *dev_spline_v;
+  cudaMalloc((double **)&dev_spline_v, (input_f->mesh + 2) * sizeof(double));
+  cudaMemcpy(dev_spline_v, spline.value, 1000 * sizeof(double),
+             cudaMemcpyHostToDevice);
+
+  double *dev_spline_y;
+  cudaMalloc((double **)&dev_spline_y, (input_f->mesh + 2) * sizeof(double));
+  cudaMemcpy(dev_spline_y, spline.y, 1000 * sizeof(double),
+             cudaMemcpyHostToDevice);
+
+  int *dev_point_1;
+  cudaMalloc((int **)&dev_point_1, grid_size * sizeof(int));
+  cudaMemcpy(dev_point_1, calc_point_1, grid_size * sizeof(int),
+             cudaMemcpyHostToDevice);
+
+  int *dev_point_2;
+  cudaMalloc((int **)&dev_point_2, grid_size * sizeof(int));
+  cudaMemcpy(dev_point_2, calc_point_2, grid_size * sizeof(int),
+             cudaMemcpyHostToDevice);
+
+  int cube_radius = int(cutoff / (lx / nx)) + 2;
+
+  dim3 gsize(grid_size, 1, 1);
+  dim3 bsize(block_size, 1, 1);
+
+  calc<<<grid_size, block_size, 10 * sizeof(float)>>>(
+      lx, ly, lz, nx, ny, nz, dev_v, dev_px, dev_py, dev_pz, dev_spline_v,
+      dev_spline_y, cutoff, mesh, dev_point_1, dev_point_2, cube_radius);
+  cudaDeviceSynchronize();
+  cudaError_t error = cudaGetLastError();
+  printf("CUDA error: %s\n", cudaGetErrorString(error));
+
   return 0;
 }
