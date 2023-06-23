@@ -11,6 +11,8 @@
 #include "./include/input.h"
 #include "./include/itpln.h"
 
+#define THREADS_NUM_THRESHOLD 600
+
 using namespace std;
 
 __device__ double calc_spline(double y[], double value[], double &len, int &n,
@@ -25,6 +27,7 @@ __device__ double calc_spline(double y[], double value[], double &len, int &n,
   double frac_2 = dx_2 / h;
   ans = ((1 + 2 * frac_1) * value[p - 1] + dx_1 * y[p - 1]) * frac_2 * frac_2 +
         ((1 - 2 * frac_2) * value[p] + dx_2 * y[p]) * frac_1 * frac_1;
+  // printf("x:%f,value:%f,ans:%f\n", x, value[p - 1], ans);
   return ans;
 }
 
@@ -32,22 +35,181 @@ __global__ void calc(double lx, double ly, double lz, int nx, int ny, int nz,
                      double *V, double *px, double *py, double *pz,
                      double *spline_value, double *spline_y, double cutoff,
                      int n_mesh, int *calc_point_1, int *calc_point_2,
-                     int cube_r) {
-  if (threadIdx.x % 500 == 0) {
-    double dx = lx / nx;
-    int x = blockIdx.x;
-    int p1 = calc_point_1[x];
-    int p2 = calc_point_2[x];
-    int cx = int(px[p1] / dx);
-    int cy = int(py[p1] / dx);
-    int cz = int(pz[p1] / dx);
-    double v_t = V[cx * ny * nz + cy * nz + cz];
-    printf(
-        "I'm gpu %d - %d . At least it works.\n  My point 1 is: %d : "
-        "(%f,%f,%f). My point 2 is: %d : (%f,%f,%f).\n  My central point "
-        "is:(%d,%d,%d), cube radius = %d, V at center = %f \n",
-        blockIdx.x, threadIdx.x, calc_point_1[x], px[p1], py[p1], pz[p1],
-        calc_point_2[x], px[p2], py[p2], pz[p2], cx, cy, cz, cube_r, v_t);
+                     int cube_r, int block_case, double *result) {
+  extern __shared__ float shared_num[];
+  double dx = lx / nx;
+  int my_point = blockIdx.x;
+  int index = threadIdx.x;
+  int p1 = calc_point_1[my_point];
+  int p2 = calc_point_2[my_point];
+  double px1 = px[p1];
+  double py1 = py[p1];
+  double pz1 = pz[p1];
+  double px2 = px[p2];
+  double py2 = py[p2];
+  double pz2 = pz[p2];
+  int cx = int(px[p1] / dx);
+  int cy = int(py[p1] / dx);
+  int cz = int(pz[p1] / dx);
+  int cube_len = cube_r * 2 + 1;
+  double sum = 0.0;
+  if (block_case == 1) {
+    int x_int = index / (cube_len * cube_len) + cx - cube_r;
+    int y_int = (index / (cube_len)) % cube_len + cy - cube_r;
+    int z_int = index % cube_len + cz - cube_r;
+    if (x_int < 0 || x_int >= nx || y_int < 0 || y_int >= ny || z_int < 0 ||
+        z_int >= nz) {
+      sum = 0.0;
+    } else {
+      double x = x_int * dx;
+      double y = y_int * dx;
+      double z = z_int * dx;
+      double dist1 = sqrt((px1 - x) * (px1 - x) + (py1 - y) * (py1 - y) +
+                          (pz1 - z) * (pz1 - z));
+      double dist2 = 0;
+      if (p1 == p2) {
+        if (dist1 > cutoff)
+          sum = 0.0;
+        else {
+          double f = calc_spline(spline_y, spline_value, cutoff, n_mesh, dist1);
+          sum = f * f * dx * dx * dx * V[x_int * ny * nz + y_int * nz + z_int];
+        }
+      } else {
+        dist2 = sqrt((px2 - x) * (px2 - x) + (py2 - y) * (py2 - y) +
+                     (pz2 - z) * (pz2 - z));
+        if (dist1 > cutoff || dist2 > cutoff)
+          sum = 0.0;
+        else {
+          double f1 =
+              calc_spline(spline_y, spline_value, cutoff, n_mesh, dist1);
+          double f2 =
+              calc_spline(spline_y, spline_value, cutoff, n_mesh, dist2);
+          sum =
+              f1 * f2 * dx * dx * dx * V[x_int * ny * nz + y_int * nz + z_int];
+        }
+      }
+    }
+    __syncthreads();
+    atomicAdd(&shared_num[0], float(sum));
+    __syncthreads();
+    if (!threadIdx.x) result[blockIdx.x] = double(shared_num[0]);
+    return;
+  } else if (block_case == 2) {
+    int x_int = index / (cube_len) + cx - cube_r;
+    int y_int = index % cube_len + cy - cube_r;
+    int z_int = 0;
+    for (int i = 0; i < cube_len; i++) {
+      z_int = i + cz - cube_r;
+      if (x_int < 0 || x_int >= nx || y_int < 0 || y_int >= ny || z_int < 0 ||
+          z_int >= nz) {
+        sum += 0.0;
+      } else {
+        double x = x_int * dx;
+        double y = y_int * dx;
+        double z = z_int * dx;
+        double dist1 = sqrt((px1 - x) * (px1 - x) + (py1 - y) * (py1 - y) +
+                            (pz1 - z) * (pz1 - z));
+        // printf("dist: %f \n", dist1);
+        double dist2 = 0;
+        if (p1 == p2) {
+          if (dist1 > cutoff)
+            sum += 0.0;
+          else {
+            double f =
+                calc_spline(spline_y, spline_value, cutoff, n_mesh, dist1);
+            // printf("f: %f\n", f);
+            sum +=
+                f * f * dx * dx * dx * V[x_int * ny * nz + y_int * nz + z_int];
+          }
+        } else {
+          dist2 = sqrt((px2 - x) * (px2 - x) + (py2 - y) * (py2 - y) +
+                       (pz2 - z) * (pz2 - z));
+          if (dist1 > cutoff || dist2 > cutoff)
+            sum += 0.0;
+          else {
+            double f1 =
+                calc_spline(spline_y, spline_value, cutoff, n_mesh, dist1);
+            double f2 =
+                calc_spline(spline_y, spline_value, cutoff, n_mesh, dist2);
+            sum += f1 * f2 * dx * dx * dx *
+                   V[x_int * ny * nz + y_int * nz + z_int];
+          }
+        }
+      }
+    }
+    __syncthreads();
+    atomicAdd(&shared_num[0], float(sum));
+    __syncthreads();
+    if (!threadIdx.x) {
+      result[blockIdx.x] = double(shared_num[0]);
+      // printf("On block %d, result = %f \n", blockIdx.x, result[blockIdx.x]);
+    }
+    return;
+  } else if (block_case == 3) {
+    int x_int = 0;
+    int y_int = 0;
+    int z_int = 0;
+    int total_points = cube_len * cube_len;
+    int block_size = THREADS_NUM_THRESHOLD;
+    int my_thd = threadIdx.x;
+
+    int ave = total_points / block_size;
+    int index_num = (my_thd < total_points % block_size) ? ave + 1 : ave;
+    int index_start = (my_thd < total_points % block_size)
+                          ? my_thd * (ave + 1)
+                          : (total_points % block_size) * (ave + 1) +
+                                (my_thd - total_points % block_size) * ave;
+    for (int j = index_start; j < index_num + index_start; j++) {
+      x_int = j / (cube_len) + cx - cube_r;
+      y_int = j % cube_len + cy - cube_r;
+      for (int i = 0; i < cube_len; i++) {
+        z_int = i + cz - cube_r;
+        if (x_int < 0 || x_int >= nx || y_int < 0 || y_int >= ny || z_int < 0 ||
+            z_int >= nz) {
+          sum += 0.0;
+        } else {
+          double x = x_int * dx;
+          double y = y_int * dx;
+          double z = z_int * dx;
+          double dist1 = sqrt((px1 - x) * (px1 - x) + (py1 - y) * (py1 - y) +
+                              (pz1 - z) * (pz1 - z));
+          // printf("dist: %f \n", dist1);
+          double dist2 = 0;
+          if (p1 == p2) {
+            if (dist1 > cutoff)
+              sum += 0.0;
+            else {
+              double f =
+                  calc_spline(spline_y, spline_value, cutoff, n_mesh, dist1);
+              // printf("f: %f\n", f);
+              sum += f * f * dx * dx * dx *
+                     V[x_int * ny * nz + y_int * nz + z_int];
+            }
+          } else {
+            dist2 = sqrt((px2 - x) * (px2 - x) + (py2 - y) * (py2 - y) +
+                         (pz2 - z) * (pz2 - z));
+            if (dist1 > cutoff || dist2 > cutoff)
+              sum += 0.0;
+            else {
+              double f1 =
+                  calc_spline(spline_y, spline_value, cutoff, n_mesh, dist1);
+              double f2 =
+                  calc_spline(spline_y, spline_value, cutoff, n_mesh, dist2);
+              sum += f1 * f2 * dx * dx * dx *
+                     V[x_int * ny * nz + y_int * nz + z_int];
+            }
+          }
+        }
+      }
+    }
+    __syncthreads();
+    atomicAdd(&shared_num[0], float(sum));
+    __syncthreads();
+    if (!threadIdx.x) {
+      result[blockIdx.x] = double(shared_num[0]);
+      // printf("On block %d, result = %f \n", blockIdx.x, result[blockIdx.x]);
+    }
+    return;
   }
 }
 
@@ -124,13 +286,10 @@ int main() {
     }
   }
 
+  // cout << "grid:" << grid_size << endl;
+
   // these go into GPU.
   Spline spline(input_f->mesh, input_f->cutoff, input_f->f);
-
-  int spline_n = spline.n;
-  double spline_len = spline.len;
-
-  int block_size = 1024;
 
   // replicate these variables
 
@@ -155,12 +314,12 @@ int main() {
              cudaMemcpyHostToDevice);
 
   double *dev_spline_v;
-  cudaMalloc((double **)&dev_spline_v, (input_f->mesh + 2) * sizeof(double));
+  cudaMalloc((double **)&dev_spline_v, 1000 * sizeof(double));
   cudaMemcpy(dev_spline_v, spline.value, 1000 * sizeof(double),
              cudaMemcpyHostToDevice);
 
   double *dev_spline_y;
-  cudaMalloc((double **)&dev_spline_y, (input_f->mesh + 2) * sizeof(double));
+  cudaMalloc((double **)&dev_spline_y, 1000 * sizeof(double));
   cudaMemcpy(dev_spline_y, spline.y, 1000 * sizeof(double),
              cudaMemcpyHostToDevice);
 
@@ -174,17 +333,69 @@ int main() {
   cudaMemcpy(dev_point_2, calc_point_2, grid_size * sizeof(int),
              cudaMemcpyHostToDevice);
 
-  int cube_radius = int(cutoff / (lx / nx)) + 2;
+  int cube_radius = int(cutoff / (lx / nx)) + 1;
+  int cube_len = 2 * cube_radius + 1;
+  int cube_2 = cube_len * cube_len;
+  int cube_3 = cube_len * cube_len * cube_len;
 
-  dim3 gsize(grid_size, 1, 1);
-  dim3 bsize(block_size, 1, 1);
+  int block_size = THREADS_NUM_THRESHOLD;
+  int block_case = 0;
+  if (cube_3 <= THREADS_NUM_THRESHOLD) {
+    block_size = cube_3;
+    block_case = 1;
+  } else if (cube_3 > THREADS_NUM_THRESHOLD && cube_2 < THREADS_NUM_THRESHOLD) {
+    block_size = cube_2;
+    block_case = 2;
+  } else {
+    block_case = 3;
+    block_size = THREADS_NUM_THRESHOLD;
+  }
 
-  calc<<<grid_size, block_size, 10 * sizeof(float)>>>(
+  double *dev_result;
+  cudaMalloc((double **)&dev_result, grid_size * sizeof(double));
+  cout << "calculating..." << endl;
+  // timer
+  cudaEvent_t start, stop;
+  float elapsedTime = 0.0;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  cudaEventRecord(start, 0);
+
+  calc<<<grid_size, block_size, 1 * sizeof(float)>>>(
       lx, ly, lz, nx, ny, nz, dev_v, dev_px, dev_py, dev_pz, dev_spline_v,
-      dev_spline_y, cutoff, mesh, dev_point_1, dev_point_2, cube_radius);
+      dev_spline_y, cutoff, mesh, dev_point_1, dev_point_2, cube_radius,
+      block_case, dev_result);
   cudaDeviceSynchronize();
+
+  cudaEventRecord(stop, 0);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&elapsedTime, start, stop);
+  cout << "calc time: " << elapsedTime << " ms" << endl;
+
   cudaError_t error = cudaGetLastError();
   printf("CUDA error: %s\n", cudaGetErrorString(error));
+
+  double host_result[200];
+  cudaMemcpy(host_result, dev_result, grid_size * sizeof(double),
+             cudaMemcpyDeviceToHost);
+  double hamilton[50][50];
+  memset(hamilton, 0, sizeof(hamilton));
+  for (int i = 0; i < grid_size; i++) {
+    int pi = calc_point_1[i];
+    int pj = calc_point_2[i];
+    hamilton[pi][pj] = hamilton[pj][pi] = host_result[i];
+  }
+
+  ofstream out;
+  out.open("./result/hamilton_cuda.txt");
+  out << point_num << endl;
+  for (int i = 0; i < point_num; i++) {
+    for (int j = 0; j < point_num; j++) {
+      out << setw(15) << hamilton[i][j];
+    }
+    out << endl;
+  }
+  out.close();
 
   return 0;
 }
