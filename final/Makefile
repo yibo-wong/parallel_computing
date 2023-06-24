@@ -13,4 +13,3 @@ cuda: cuda_v0.cu
 
 clean:
 	rm -f serial omp serial_origin diago_serial diago_parallel a.out
-	rm -f ./result/*.txt

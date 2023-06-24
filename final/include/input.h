@@ -12,7 +12,7 @@
 using namespace std;
 
 class Input_V {
- public:
+public:
   int nx, ny, nz;
   double *V;
 
@@ -61,7 +61,7 @@ class Input_V {
 };
 
 class Input_demand {
- public:
+public:
   bool isHexahedral = 0;
   double lx = 0;
   double ly = 0;
@@ -141,7 +141,7 @@ class Input_demand {
 };
 
 class Input_points {
- public:
+public:
   int num = 0;
   double px[60], py[60], pz[60];
 
@@ -174,7 +174,7 @@ class Input_points {
 };
 
 class Input_f {
- public:
+public:
   double cutoff = 0;
   double dr = 0;
   int mesh = 0;

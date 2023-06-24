@@ -1,7 +1,34 @@
 # 使用文档: openmp / cuda
 >2100011025 王奕博
 
-**写在前面：我确信我的程序都是可以正确运行的，然而文字描述如何运行难免出现纰漏。因此，如果真的遇到运行不了的情况，请求助教联系我，共同解决问题，非常感谢~**
+**写在前面：我确信我的程序都是可以正确运行的，然而文字描述如何运行难免出现纰漏。因此，如果真的遇到运行不了的情况，请求助教学长直接联系我，共同解决问题，非常感谢~**
+
+## -1. 程序逻辑
+
+程序的主要文件包括了以下部分(去掉了“乱七八糟”的文件)：
+```
+├── include
+│   ├── input.h
+│   ├── itpln.h
+│   ├── omp_timer.h
+│   ├── preprocess.h
+│   ├── scalapack_connector.h
+│   └── timer.h
+├── Makefile
+├── serial_v0.cpp
+├── serial_v1.cpp
+├── omp_v0.cpp
+├── cuda_v0.cu
+├── diago.cpp
+└── diago_serial.cpp
+```
+
+它们的作用主要如下：
+
+1. include中是各种头文件，具体功能见代码报告；
+2. **serial_v0.cpp, serial_v1.cpp, omp_v0.cpp, cuda_v0.cu**的功能，是读取V, point, distribution文件，并**计算出要求的矩阵**（以下称为Hamilton矩阵），将这个文件**保存到 ./result/hamilton.txt**下。注意，这里不包括对角化的步骤；
+3. **diago.cpp, diago_serial.cpp**的作用，是 **./result下存在hamilton.txt**的前提下，将这个文件保存的矩阵分别用lapack和scalapack进行对角化，并**将特征值和特征向量分别保存到./result/diago_lapack.txt和./result/diago_scalapack.txt**下。注意，2和3在逻辑上是可以分开的；
+4. Makefile中的命令可以编译以上所有.cpp, .cu文件，并且其中的make clean可以将编译出的文件删除掉。
 
 ## 0. 准备操作
 
@@ -72,7 +99,7 @@ make serial
 ```
 make clean
 ```
-进行清理，注意这会**同时删除输出的txt文件**,因此如果要继续对角化的话，请暂时不要清理。
+进行清理。
 
 ## 2.并行（openmp）版本
 
@@ -87,6 +114,8 @@ make omp
 ```
 
 之后，会在result文件夹下输出所求的hamilton矩阵hamilton.txt，屏幕上也会显示时长，calc项是计算所用时间。
+
+预期速度：V512，50个点的速度大概在一秒以内（纯计算时间，读入时间不算），V1024的速度大概在三秒左右（读入要六分多钟）。如果差别太大请联系我，谢谢~
 
 **如果之后还要对角化，请不要清理**；否则，使用
 ```
@@ -110,11 +139,17 @@ make cuda
 
 之后，会在result文件夹下输出所求的hamilton矩阵hamilton.txt。
 
-**如果之后还要对角化，请不要清理**；否则，使用
-```
-make clean
-```
-清理。
+**注意：** GPU测试的那台机器上什么mpi,openmp,lapack都没有，甚至apt都没有...而且试图联网也做不到，实在是没法搞对角化的那一堆库（不是我不想是实在做不到啊，哭）。这里有两种解决方案：
+
+1. 把输出的hamilton.txt复制到可以进行对角化的地方，比如bohrium机器上，然后用大作业里lapack或者scalapack进行对角化
+
+2. 直接对比同一样例下openMP和cuda的hamilton.txt跑出来的文件是否很相似。这个我自己对比过，基本上是完全一样的。
+
+还有，如果因为程序block中的thread过多所以跑不了，这样的话解决方案有：打开cuda_v0.cu，看第14行，将
+#define THREADS_NUM_THRESHOLD 800
+的800改为更小的数字。
+
+预期的速度是：跑512个格点速度大概是36毫秒，1024的话大概200多毫秒，如果差别太大的话请联系我，我很确定这个速度是可以跑出来的，十分感谢~
 
 ## 4.对角化（lapack）
 
@@ -132,6 +167,8 @@ make diago_serial
 
 ## 5.对角化（scalapack）
 
+**对角化之前，请确认result文件夹下有hamilton.txt文件。这很重要！**
+
 使用并行版本的对角化，编译命令（当然，请确保测试机器上是有相关环境的）：
 ```
 make diago_parallel
@@ -143,4 +180,15 @@ mpirun -np 4 ./diago_parallel
 
 程序会将结果放在diago_scalapack.txt中。
 
-以上便是全部程序功能，具体程序实现细节请见代码报告。
+## 6.一些注意事项
+
+1. gpu的机器上面不支持lapack相关，只能做到算出Hamilton矩阵相关。这里的解决方案见上面相关。
+
+2. 一定要确保输入的point文件符合正确格式，我在这上面浪费了许多时间。
+
+3. 使用scalapack的运行时mpirun一定要按照格式，否则会出问题。
+
+4. GPU每个block中能支持的thread数是个谜，有时候下午还能运行晚上就运行不了，如果因为这个运行不了，解决方案有：打开cuda_v0.cu，看第14行，将
+#define THREADS_NUM_THRESHOLD 800
+的800改为更小的数字。不过一般来说800够了。
+
