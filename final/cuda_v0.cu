@@ -10,11 +10,12 @@
 
 #include "./include/input.h"
 #include "./include/itpln.h"
-
-#define THREADS_NUM_THRESHOLD 600
+// the maximum number of threads a block has.
+#define THREADS_NUM_THRESHOLD 800
 
 using namespace std;
-
+// calculating the spline interpolation in GPU. The prefix __device__ means the
+// next function will use it.
 __device__ double calc_spline(double y[], double value[], double &len, int &n,
                               double &x) {
   int p;
@@ -27,10 +28,9 @@ __device__ double calc_spline(double y[], double value[], double &len, int &n,
   double frac_2 = dx_2 / h;
   ans = ((1 + 2 * frac_1) * value[p - 1] + dx_1 * y[p - 1]) * frac_2 * frac_2 +
         ((1 - 2 * frac_2) * value[p] + dx_2 * y[p]) * frac_1 * frac_1;
-  // printf("x:%f,value:%f,ans:%f\n", x, value[p - 1], ans);
   return ans;
 }
-
+// the whole calculation process.
 __global__ void calc(double lx, double ly, double lz, int nx, int ny, int nz,
                      double *V, double *px, double *py, double *pz,
                      double *spline_value, double *spline_y, double cutoff,
@@ -53,6 +53,8 @@ __global__ void calc(double lx, double ly, double lz, int nx, int ny, int nz,
   int cz = int(pz[p1] / dx);
   int cube_len = cube_r * 2 + 1;
   double sum = 0.0;
+  // CASE 1: the size is small. Every thread only have to calculate a single
+  // point.
   if (block_case == 1) {
     int x_int = index / (cube_len * cube_len) + cx - cube_r;
     int y_int = (index / (cube_len)) % cube_len + cy - cube_r;
@@ -89,12 +91,20 @@ __global__ void calc(double lx, double ly, double lz, int nx, int ny, int nz,
         }
       }
     }
+    shared_num[index] = sum;
     __syncthreads();
-    atomicAdd(&shared_num[0], float(sum));
-    __syncthreads();
+    // atomicAdd(&shared_num[0], float(sum));
+    for (int s = 1; s < blockDim.x; s *= 2) {
+      if (index % (2 * s) == 0 && index + s < blockDim.x) {
+        shared_num[index] += shared_num[index + s];
+      }
+      __syncthreads();
+    }
     if (!threadIdx.x) result[blockIdx.x] = double(shared_num[0]);
     return;
-  } else if (block_case == 2) {
+  }
+  // CASE 2: the size is medium. Every thread have to calculate a row of points.
+  else if (block_case == 2) {
     int x_int = index / (cube_len) + cx - cube_r;
     int y_int = index % cube_len + cy - cube_r;
     int z_int = 0;
@@ -109,7 +119,6 @@ __global__ void calc(double lx, double ly, double lz, int nx, int ny, int nz,
         double z = z_int * dx;
         double dist1 = sqrt((px1 - x) * (px1 - x) + (py1 - y) * (py1 - y) +
                             (pz1 - z) * (pz1 - z));
-        // printf("dist: %f \n", dist1);
         double dist2 = 0;
         if (p1 == p2) {
           if (dist1 > cutoff)
@@ -117,7 +126,6 @@ __global__ void calc(double lx, double ly, double lz, int nx, int ny, int nz,
           else {
             double f =
                 calc_spline(spline_y, spline_value, cutoff, n_mesh, dist1);
-            // printf("f: %f\n", f);
             sum +=
                 f * f * dx * dx * dx * V[x_int * ny * nz + y_int * nz + z_int];
           }
@@ -137,15 +145,22 @@ __global__ void calc(double lx, double ly, double lz, int nx, int ny, int nz,
         }
       }
     }
+    shared_num[index] = sum;
     __syncthreads();
-    atomicAdd(&shared_num[0], float(sum));
-    __syncthreads();
+    for (unsigned int s = 1; s < blockDim.x; s *= 2) {
+      int temp = 2 * s * index;
+      if (temp + s < blockDim.x) {
+        shared_num[temp] += shared_num[temp + s];
+      }
+      __syncthreads();
+    }
     if (!threadIdx.x) {
       result[blockIdx.x] = double(shared_num[0]);
-      // printf("On block %d, result = %f \n", blockIdx.x, result[blockIdx.x]);
     }
     return;
-  } else if (block_case == 3) {
+  }
+  // CASE 3: the size is big. Evenly distribute the points to the threads.
+  else if (block_case == 3) {
     int x_int = 0;
     int y_int = 0;
     int z_int = 0;
@@ -173,7 +188,6 @@ __global__ void calc(double lx, double ly, double lz, int nx, int ny, int nz,
           double z = z_int * dx;
           double dist1 = sqrt((px1 - x) * (px1 - x) + (py1 - y) * (py1 - y) +
                               (pz1 - z) * (pz1 - z));
-          // printf("dist: %f \n", dist1);
           double dist2 = 0;
           if (p1 == p2) {
             if (dist1 > cutoff)
@@ -181,7 +195,6 @@ __global__ void calc(double lx, double ly, double lz, int nx, int ny, int nz,
             else {
               double f =
                   calc_spline(spline_y, spline_value, cutoff, n_mesh, dist1);
-              // printf("f: %f\n", f);
               sum += f * f * dx * dx * dx *
                      V[x_int * ny * nz + y_int * nz + z_int];
             }
@@ -202,12 +215,18 @@ __global__ void calc(double lx, double ly, double lz, int nx, int ny, int nz,
         }
       }
     }
+    shared_num[index] = sum;
     __syncthreads();
-    atomicAdd(&shared_num[0], float(sum));
-    __syncthreads();
+    for (unsigned int s = 1; s < blockDim.x; s *= 2) {
+      int temp = 2 * s * index;
+      if (temp + s < blockDim.x) {
+        shared_num[temp] += shared_num[temp + s];
+      }
+      __syncthreads();
+    }
+
     if (!threadIdx.x) {
       result[blockIdx.x] = double(shared_num[0]);
-      // printf("On block %d, result = %f \n", blockIdx.x, result[blockIdx.x]);
     }
     return;
   }
@@ -286,8 +305,6 @@ int main() {
     }
   }
 
-  // cout << "grid:" << grid_size << endl;
-
   // these go into GPU.
   Spline spline(input_f->mesh, input_f->cutoff, input_f->f);
 
@@ -361,7 +378,7 @@ int main() {
   cudaEventCreate(&stop);
   cudaEventRecord(start, 0);
 
-  calc<<<grid_size, block_size, 1 * sizeof(float)>>>(
+  calc<<<grid_size, block_size, THREADS_NUM_THRESHOLD * sizeof(float)>>>(
       lx, ly, lz, nx, ny, nz, dev_v, dev_px, dev_py, dev_pz, dev_spline_v,
       dev_spline_y, cutoff, mesh, dev_point_1, dev_point_2, cube_radius,
       block_case, dev_result);

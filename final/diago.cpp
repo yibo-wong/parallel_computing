@@ -139,7 +139,7 @@ int main(int argc, char **argv) {
   }
   if (!myrank) {
     ofstream out;
-    out.open("./result/diago.txt");
+    out.open("./result/diago_scalapack.txt");
     out << "-------------------eigenvalue:-------------------" << endl;
     for (int i = 0; i < n; i++) {
       out << W[i] << endl;
@@ -151,16 +151,9 @@ int main(int argc, char **argv) {
       }
       out << endl;
     }
-    // out << "--------------eigenvector(last element 1):--------------" <<
-    // endl; for (int i = 0; i < n; i++) {
-    //   for (int j = 0; j < n; j++) {
-    //     out << setw(15) << EV[i][j] / EV[n - 1][j];
-    //   }
-    //   out << endl;
-    // }
     out.close();
-    cout << "The result is printed in file \"./result/diago.txt\"  . Check it "
-            "out!"
+    cout << "The result is printed in file \"./result/diago_scalapack.txt\"  . "
+            "Check it out!"
          << endl;
   }
   blacs_gridexit_(&icontxt);
